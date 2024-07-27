@@ -5,7 +5,7 @@
 # Configuration
 config_dir="/etc/dd2cf"
 config_file="${config_dir}/dd2cf.conf"
-log_dir="/var/log"
+log_dir="${HOME}/log"
 log_file="${log_dir}/dd2cf.log"
 cloudflare_base="https://api.cloudflare.com/client/v4"
 
@@ -20,7 +20,7 @@ log_message() {
 create_dir_if_not_exists() {
     if [ ! -d "$1" ]; then
         log_message "Creating directory: $1"
-        sudo mkdir -p "$1"
+        mkdir -p "$1"
         if [ $? -eq 0 ]; then
             log_message "Successfully created directory: $1"
         else
@@ -68,7 +68,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # Ensure required commands are installed
-for cmd in yq curl; do
+for cmd in jq curl; do
     if ! command -v $cmd &> /dev/null; then
         echo "Error: '$cmd' is required but not found. Please install it."
         exit 1
@@ -82,7 +82,7 @@ create_dir_if_not_exists "$log_dir"
 # Create log file if it doesn't exist
 if [ ! -f "$log_file" ]; then
     log_message "Creating log file: $log_file"
-    sudo touch "$log_file"
+    touch "$log_file"
     if [ $? -eq 0 ]; then
         log_message "Successfully created log file: $log_file"
     else
@@ -123,7 +123,7 @@ existing_records_raw=$(curl -s -X GET \
     "${cloudflare_base}/zones/${zone_id}/dns_records" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${api_key}" \
-    | yq -oj -I=0 '.result[] | select(.type == "A") | [.id, .name, .ttl, .content]')
+    | jq -c '.result[] | select(.type == "A") | [.id, .name, .ttl, .content]')
 
 # Process DNS records
 log_message "Processing DNS records..."
@@ -133,10 +133,10 @@ while IFS= read -r line; do
         dns_proxy=$(grep "^dns_proxy=" -A1 <<< "$line" | tail -n1 | cut -d'=' -f2)
         
         for record in $existing_records_raw; do
-            id=$(echo "$record" | yq '.[0]')
-            name=$(echo "$record" | yq '.[1]')
-            ttl=$(echo "$record" | yq '.[2]')
-            content=$(echo "$record" | yq '.[3]')
+            id=$(echo "$record" | jq -r '.[0]')
+            name=$(echo "$record" | jq -r '.[1]')
+            ttl=$(echo "$record" | jq -r '.[2]')
+            content=$(echo "$record" | jq -r '.[3]')
 
             if [ "$name" = "$dns_name" ]; then
                 if [ "$public_ip" != "$content" ]; then
