@@ -9,25 +9,28 @@ log_dir="${HOME}/log"
 log_file="${log_dir}/dd2cf.log"
 cloudflare_base="https://api.cloudflare.com/client/v4"
 
+# Function to create directory if it doesn't exist
+create_dir_if_not_exists() {
+    if [ ! -d "$1" ]; then
+        echo "Creating directory: $1"
+        mkdir -p "$1"
+        if [ $? -eq 0 ]; then
+            echo "Successfully created directory: $1"
+        else
+            echo "Failed to create directory: $1"
+            exit 1
+        fi
+    fi
+}
+
+# Create log directory
+create_dir_if_not_exists "$log_dir"
+
 # Function to log messages
 log_message() {
     local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
     echo "[$timestamp] $1" >> "$log_file"
     [ "$verbose" = true ] && echo "[$timestamp] $1"
-}
-
-# Function to create directory if it doesn't exist
-create_dir_if_not_exists() {
-    if [ ! -d "$1" ]; then
-        log_message "Creating directory: $1"
-        mkdir -p "$1"
-        if [ $? -eq 0 ]; then
-            log_message "Successfully created directory: $1"
-        else
-            log_message "Failed to create directory: $1"
-            exit 1
-        fi
-    fi
 }
 
 # Print usage text and exit
@@ -70,26 +73,13 @@ done
 # Ensure required commands are installed
 for cmd in jq curl; do
     if ! command -v $cmd &> /dev/null; then
-        echo "Error: '$cmd' is required but not found. Please install it."
+        log_message "Error: '$cmd' is required but not found. Please install it."
         exit 1
     fi
 done
 
 # Create necessary directories
 create_dir_if_not_exists "$config_dir"
-create_dir_if_not_exists "$log_dir"
-
-# Create log file if it doesn't exist
-if [ ! -f "$log_file" ]; then
-    log_message "Creating log file: $log_file"
-    touch "$log_file"
-    if [ $? -eq 0 ]; then
-        log_message "Successfully created log file: $log_file"
-    else
-        echo "Failed to create log file: $log_file"
-        exit 1
-    fi
-fi
 
 # Check if config file exists
 if [ ! -f "$config_file" ]; then
@@ -119,11 +109,17 @@ api_key=$(grep '^api_key=' "$config_file" | cut -d'=' -f2)
 
 # Get records from Cloudflare
 log_message "Fetching DNS records from Cloudflare..."
-existing_records_raw=$(curl -s -X GET \
+cloudflare_response=$(curl -s -X GET \
     "${cloudflare_base}/zones/${zone_id}/dns_records" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer ${api_key}" \
-    | jq -c '.result[] | select(.type == "A") | [.id, .name, .ttl, .content]')
+    -H "Authorization: Bearer ${api_key}")
+
+if [ "$(echo "$cloudflare_response" | jq -r '.success')" != "true" ]; then
+    log_message "Error fetching DNS records from Cloudflare: $(echo "$cloudflare_response" | jq -r '.errors[0].message')"
+    exit 1
+fi
+
+existing_records_raw=$(echo "$cloudflare_response" | jq -c '.result[] | select(.type == "A") | [.id, .name, .ttl, .content]')
 
 # Process DNS records
 log_message "Processing DNS records..."
@@ -132,7 +128,7 @@ while IFS= read -r line; do
         dns_name="${line#dns_name=}"
         dns_proxy=$(grep "^dns_proxy=" -A1 <<< "$line" | tail -n1 | cut -d'=' -f2)
         
-        for record in $existing_records_raw; do
+        echo "$existing_records_raw" | while read -r record; do
             id=$(echo "$record" | jq -r '.[0]')
             name=$(echo "$record" | jq -r '.[1]')
             ttl=$(echo "$record" | jq -r '.[2]')
@@ -154,10 +150,10 @@ while IFS= read -r line; do
                             "ttl": '${ttl}'
                         }')
                     
-                    if echo "$update_result" | grep -q '"success":true'; then
+                    if echo "$update_result" | jq -e '.success' > /dev/null; then
                         log_message "Successfully updated $name"
                     else
-                        log_message "Failed to update $name"
+                        log_message "Failed to update $name: $(echo "$update_result" | jq -r '.errors[0].message')"
                     fi
                 else
                     log_message "$name did not change"
