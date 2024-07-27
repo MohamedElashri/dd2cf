@@ -86,24 +86,30 @@ for record in ${existing_records_raw[@]}; do
         if [ "$name" = "$c_name" ]; then
             if [ "$public_ip" != "$content" ]; then
                 log_message "Updating DNS record for $name..."
+                
+                # Construct and log the request body
+                request_body='{
+                    "content": "'${public_ip}'",
+                    "name": "'${name}'",
+                    "proxied": '${c_proxy}',
+                    "type": "A",
+                    "comment": "Managed by dd2cf.sh",
+                    "ttl": '${ttl}'
+                }'
+                log_message "Request body: $request_body"
+                
                 update_result=$(curl -s -X PATCH \
                     "${cloudflare_base}/zones/${zone_id}/dns_records/${id}" \
                     -H "Content-Type: application/json" \
                     -H "Authorization: Bearer ${api_key}" \
-                    -d '{
-                        "content": "'${public_ip}'",
-                        "name": "'${name}'",
-                        "proxied": '${c_proxy}',
-                        "type": "A",
-                        "comment": "Managed by dd2cf.sh",
-                        "ttl": '${ttl}'
-                    }')
+                    -d "$request_body")
                 
                 if echo "$update_result" | jq -e '.success' > /dev/null; then
                     log_message "Successfully updated $name"
                 else
                     error_message=$(echo "$update_result" | jq -r '.errors[0].message // "Unknown error"')
                     log_message "Failed to update $name: $error_message"
+                    log_message "Full response: $update_result"
                 fi
             else
                 log_message "$name did not change"
