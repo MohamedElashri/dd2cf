@@ -14,7 +14,7 @@ dd2cf.sh is a Bash script that automatically updates Cloudflare DNS 'A' records 
 
 - Bash shell
 - `curl`
-- `yq` (https://github.com/mikefarah/yq)
+- `jq`
 - Cloudflare account with API access
 
 ## Installation
@@ -93,7 +93,7 @@ This setup will run the script every 5 minutes. Adjust the timing based on your 
 
 - Check the log file at `/var/log/dd2cf.log` for detailed information about the script's operations.
 - Ensure your Cloudflare API key has the necessary permissions to modify DNS records.
-- Verify that the `curl` and `yq` commands are available on your system.
+- Verify that the `curl` and `jq` commands are available on your system.
 
 ## Contributing
 
