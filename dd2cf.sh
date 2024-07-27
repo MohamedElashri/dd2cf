@@ -1,118 +1,170 @@
 #!/bin/bash
 
-config_file_dir="/etc/dd2cf" 
-config_file_name="dd2cf.conf"
-config_file="${config_file_dir}/${config_file_name}" 
-log_file_dir="${config_file_dir}/logs"
-log_file="${log_file_dir}/dd2cf.log"
+# dd2cf.sh - Dynamic DNS to Cloudflare updater
 
+# Configuration
+config_dir="/etc/dd2cf"
+config_file="${config_dir}/dd2cf.conf"
+log_dir="/var/log"
+log_file="${log_dir}/dd2cf.log"
 cloudflare_base="https://api.cloudflare.com/client/v4"
 
-# print usage text and exit
-print_usage() {
-    echo '
-    dd2cf (Dynamic DNS Cloudflare): Update Cloudflare DNS 'A' records for your dynamic IP.
-
-    Usage: dd2cf.sh
-
-    `dd2cf` UPDATES existing records. Please, create them in Cloudflare Dashboard before running this script.
-
-    The configuration is done in `/etc/dd2cf/dd2cf.conf`.
-    Configuration file structure:
-
-    api:
-      zone-id = "<zone id>"
-      api-key = "<api key>"
-
-    dns:
-      - name = "test.example.com"
-        proxy = false
-      - name = "test2.example.com"
-        proxy = true
-    '
+# Function to log messages
+log_message() {
+    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+    echo "[$timestamp] $1" >> "$log_file"
+    [ "$verbose" = true ] && echo "[$timestamp] $1"
 }
 
-# print usage if requested
-if [ "$1" = "help" ] || [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
-    print_usage
-    exit
-fi
-
-# ensure yq is installed
-if ! command -v yq > /dev/null 2>&1; then
-    echo "Error: 'yq' required and not found."
-    echo "Please install: https://github.com/mikefarah/yq." | tee -a ${log_file}
-    exit 1
-fi
-
-# ensure curl is installed
-if ! command -v curl > /dev/null 2>&1; then
-    echo "Error: 'curl' required and not found."
-    echo "Please install: https://curl.se/download.html or through your package manager." | tee -a ${log_file}
-    exit 1
-fi
-
-# create config dir if not exists
-if [ ! -d $config_file_dir ]; then
-    echo "Directory: ${config_file_dir} does not exist."
-    echo "Creating..." | tee -a ${log_file}
-    sudo mkdir -p $config_file_dir
-
-    echo "Created ${config_file_dir}. Please, fill ${config_file}." | tee -a ${log_file}
-    exit 0
-fi
-
-# get my public ip
-public_ip=$(curl https://ip.melashri.eu.org/ip)
-
-# read zone-id and api-key from config file
-zone_id=$(yq e '.api.zone-id' ${config_file})
-api_key=$(yq e '.api.api-key' ${config_file})
-
-# get records from cloudflare
-existing_records_raw=$(curl --silent --request GET \
-    --url ${cloudflare_base}/zones/${zone_id}/dns_records \
-    --header 'Content-Type: application/json' \
-    --header "Authorization: Bearer ${api_key}" \
-    | yq -oj -I=0 '.result[] | select(.type == "A") | [.id, .name, .ttl, .content]'
-)
-
-# get records defined in config file
-readarray -t config_records < <(yq -o=json e '.dns[]' ${config_file})
-
-# iterate cloudflare records
-# for each record, check if it exists in config file
-# if it does, update record
-for record in ${existing_records_raw[@]}; do
-    id=$(yq e '.[0]' <<< "${record}")
-    name=$(yq e '.[1]' <<< "${record}")
-    ttl=$(yq e '.[2]' <<< "${record}")
-    content=$(yq e '.[3]' <<< "${record}")
-
-    for c_record in "${config_records[@]}"; do
-        c_name=$(yq e '.name' <<< ${c_record})
-        c_proxy=$(yq e '.proxy' <<< ${c_record})
-
-        if [ "$name" = "$c_name" ]; then
-            if [ "$public_ip" != "$content" ]; then
-                # update dns
-                curl --silent --request PATCH \
-                --url "${cloudflare_base}/zones/${zone_id}/dns_records/${id}" \
-                --header 'Content-Type: application/json' \
-                --header "Authorization: Bearer ${api_key}" \
-                --data '{
-                    "content": "'${public_ip}'",
-                    "name": "'${name}'",
-                    "proxied": '${c_proxy}',
-                    "type": "A",
-                    "comment": "Managed by dd2cf.sh",
-                    "ttl": '${ttl}'
-                }' > /dev/null
-
-                echo "[dd2cf.sh] OK: ${name}" | tee -a ${log_file}
-            else
-                echo "[dd2cf.sh] ${name} did not change" | tee -a ${log_file}
-            fi
+# Function to create directory if it doesn't exist
+create_dir_if_not_exists() {
+    if [ ! -d "$1" ]; then
+        log_message "Creating directory: $1"
+        sudo mkdir -p "$1"
+        if [ $? -eq 0 ]; then
+            log_message "Successfully created directory: $1"
+        else
+            log_message "Failed to create directory: $1"
+            exit 1
         fi
-    done
+    fi
+}
+
+# Print usage text and exit
+print_usage() {
+    echo "
+    dd2cf.sh (Dynamic DNS to Cloudflare): Update Cloudflare DNS 'A' records for your dynamic IP.
+
+    Usage: dd2cf.sh [-v|--verbose]
+
+    Options:
+        -v, --verbose    Enable verbose logging
+
+    dd2cf.sh UPDATES existing records. Please create them in Cloudflare Dashboard before running this script.
+
+    The configuration file must be created at: $config_file
+    Configuration file structure:
+
+    zone_id=<zone id>
+    api_key=<api key>
+
+    dns_name=test.example.com
+    dns_proxy=false
+
+    dns_name=test2.example.com
+    dns_proxy=true
+    "
+}
+
+# Parse command line options
+verbose=false
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        -v|--verbose) verbose=true ;;
+        -h|--help) print_usage; exit 0 ;;
+        *) echo "Unknown parameter: $1"; print_usage; exit 1 ;;
+    esac
+    shift
 done
+
+# Ensure required commands are installed
+for cmd in yq curl; do
+    if ! command -v $cmd &> /dev/null; then
+        echo "Error: '$cmd' is required but not found. Please install it."
+        exit 1
+    fi
+done
+
+# Create necessary directories
+create_dir_if_not_exists "$config_dir"
+create_dir_if_not_exists "$log_dir"
+
+# Create log file if it doesn't exist
+if [ ! -f "$log_file" ]; then
+    log_message "Creating log file: $log_file"
+    sudo touch "$log_file"
+    if [ $? -eq 0 ]; then
+        log_message "Successfully created log file: $log_file"
+    else
+        echo "Failed to create log file: $log_file"
+        exit 1
+    fi
+fi
+
+# Check if config file exists
+if [ ! -f "$config_file" ]; then
+    log_message "Error: Configuration file $config_file not found."
+    log_message "Please create the configuration file with the following structure:"
+    log_message "
+    zone_id=<your_zone_id>
+    api_key=<your_api_key>
+
+    dns_name=example.com
+    dns_proxy=true
+
+    dns_name=subdomain.example.com
+    dns_proxy=false
+    "
+    exit 1
+fi
+
+# Get public IP
+log_message "Fetching public IP address..."
+public_ip=$(curl -s https://ip.melashri.eu.org/ip)
+log_message "Public IP: $public_ip"
+
+# Read configuration
+zone_id=$(grep '^zone_id=' "$config_file" | cut -d'=' -f2)
+api_key=$(grep '^api_key=' "$config_file" | cut -d'=' -f2)
+
+# Get records from Cloudflare
+log_message "Fetching DNS records from Cloudflare..."
+existing_records_raw=$(curl -s -X GET \
+    "${cloudflare_base}/zones/${zone_id}/dns_records" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${api_key}" \
+    | yq -oj -I=0 '.result[] | select(.type == "A") | [.id, .name, .ttl, .content]')
+
+# Process DNS records
+log_message "Processing DNS records..."
+while IFS= read -r line; do
+    if [[ "$line" =~ ^dns_name= ]]; then
+        dns_name="${line#dns_name=}"
+        dns_proxy=$(grep "^dns_proxy=" -A1 <<< "$line" | tail -n1 | cut -d'=' -f2)
+        
+        for record in $existing_records_raw; do
+            id=$(echo "$record" | yq '.[0]')
+            name=$(echo "$record" | yq '.[1]')
+            ttl=$(echo "$record" | yq '.[2]')
+            content=$(echo "$record" | yq '.[3]')
+
+            if [ "$name" = "$dns_name" ]; then
+                if [ "$public_ip" != "$content" ]; then
+                    log_message "Updating DNS record for $name..."
+                    update_result=$(curl -s -X PATCH \
+                        "${cloudflare_base}/zones/${zone_id}/dns_records/${id}" \
+                        -H "Content-Type: application/json" \
+                        -H "Authorization: Bearer ${api_key}" \
+                        -d '{
+                            "content": "'${public_ip}'",
+                            "name": "'${name}'",
+                            "proxied": '${dns_proxy}',
+                            "type": "A",
+                            "comment": "Managed by dd2cf.sh",
+                            "ttl": '${ttl}'
+                        }')
+                    
+                    if echo "$update_result" | grep -q '"success":true'; then
+                        log_message "Successfully updated $name"
+                    else
+                        log_message "Failed to update $name"
+                    fi
+                else
+                    log_message "$name did not change"
+                fi
+            fi
+        done
+    fi
+done < "$config_file"
+
+log_message "DNS update process completed"
