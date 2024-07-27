@@ -83,6 +83,11 @@ for record in ${existing_records_raw[@]}; do
         c_name=$(echo "$c_record" | tr -d '\n')
         c_proxy=$(grep "^dns_proxy=" -A1 "$config_file" | grep -A1 "^dns_name=$c_name" | tail -n1 | cut -d'=' -f2)
 
+        # Ensure c_proxy is a valid boolean
+        if [ "$c_proxy" != "true" ] && [ "$c_proxy" != "false" ]; then
+            c_proxy="false"
+        fi
+
         if [ "$name" = "$c_name" ]; then
             if [ "$public_ip" != "$content" ]; then
                 log_message "Updating DNS record for $name..."
