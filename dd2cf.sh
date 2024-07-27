@@ -1,8 +1,8 @@
 #!/bin/bash
 
-config_file_dir="/etc/dd2cf/"
+config_file_dir="/etc/dd2cf" 
 config_file_name="dd2cf.conf"
-config_file="${config_file_dir}${config_file_name}"
+config_file="${config_file_dir}/${config_file_name}" 
 log_file_dir="${config_file_dir}/logs"
 log_file="${log_file_dir}/dd2cf.log"
 
