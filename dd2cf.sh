@@ -9,6 +9,35 @@ log_dir="${HOME}/log"
 log_file="${log_dir}/dd2cf.log"
 cloudflare_base="https://api.cloudflare.com/client/v4"
 
+# Function to print usage text and exit
+print_usage() {
+    echo '
+    dd2cf (Dynamic DNS to Cloudflare): Update Cloudflare DNS 'A' records for your dynamic IP.
+
+    Usage: dd2cf.sh [-v|--verbose] [-h|--help]
+
+    Options:
+        -v, --verbose    Enable verbose logging
+        -h, --help       Display this help message
+
+    dd2cf UPDATES existing records. Please create them in Cloudflare Dashboard before running this script.
+
+    The configuration is done in /etc/dd2cf/dd2cf.conf.
+    Configuration file structure:
+
+    zone_id=<your_zone_id>
+    api_key=<your_api_key>
+
+    dns_name=example.com
+    dns_proxy=true
+
+    dns_name=subdomain.example.com
+    dns_proxy=false
+
+    You can add multiple DNS records by repeating the dns_name and dns_proxy lines.
+    '
+}
+
 # Function to create directory if it doesn't exist
 create_dir_if_not_exists() {
     if [ ! -d "$1" ]; then
@@ -32,7 +61,8 @@ verbose=false
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -v|--verbose) verbose=true ;;
-        *) echo "Unknown parameter: $1"; exit 1 ;;
+        -h|--help) print_usage; exit 0 ;;
+        *) echo "Unknown parameter: $1"; print_usage; exit 1 ;;
     esac
     shift
 done
@@ -92,7 +122,7 @@ for record in ${existing_records_raw[@]}; do
             if [ "$public_ip" != "$content" ]; then
                 log_message "Updating DNS record for $name..."
                 
-                # Construct and log the request body
+                # Construct the request body
                 request_body='{
                     "content": "'${public_ip}'",
                     "name": "'${name}'",
@@ -101,7 +131,9 @@ for record in ${existing_records_raw[@]}; do
                     "comment": "Managed by dd2cf.sh",
                     "ttl": '${ttl}'
                 }'
-                log_message "Request body: $request_body"
+                
+                # Log request body only if verbose mode is enabled
+                [ "$verbose" = true ] && log_message "Request body: $request_body"
                 
                 update_result=$(curl -s -X PATCH \
                     "${cloudflare_base}/zones/${zone_id}/dns_records/${id}" \
@@ -114,7 +146,7 @@ for record in ${existing_records_raw[@]}; do
                 else
                     error_message=$(echo "$update_result" | jq -r '.errors[0].message // "Unknown error"')
                     log_message "Failed to update $name: $error_message"
-                    log_message "Full response: $update_result"
+                    [ "$verbose" = true ] && log_message "Full response: $update_result"
                 fi
             else
                 log_message "$name did not change"
