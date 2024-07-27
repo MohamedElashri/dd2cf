@@ -137,23 +137,32 @@ while IFS= read -r line; do
             if [ "$name" = "$dns_name" ]; then
                 if [ "$public_ip" != "$content" ]; then
                     log_message "Updating DNS record for $name..."
+                    update_body=$(jq -n \
+                        --arg content "$public_ip" \
+                        --arg name "$name" \
+                        --argjson proxied "$dns_proxy" \
+                        --argjson ttl "$ttl" \
+                        '{
+                            content: $content,
+                            name: $name,
+                            proxied: $proxied,
+                            type: "A",
+                            comment: "Managed by dd2cf.sh",
+                            ttl: $ttl
+                        }')
+                    log_message "Update body: $update_body"  # Log the update body for debugging
                     update_result=$(curl -s -X PATCH \
                         "${cloudflare_base}/zones/${zone_id}/dns_records/${id}" \
                         -H "Content-Type: application/json" \
                         -H "Authorization: Bearer ${api_key}" \
-                        -d '{
-                            "content": "'${public_ip}'",
-                            "name": "'${name}'",
-                            "proxied": '${dns_proxy}',
-                            "type": "A",
-                            "comment": "Managed by dd2cf.sh",
-                            "ttl": '${ttl}'
-                        }')
+                        -d "$update_body")
                     
                     if echo "$update_result" | jq -e '.success' > /dev/null; then
                         log_message "Successfully updated $name"
                     else
-                        log_message "Failed to update $name: $(echo "$update_result" | jq -r '.errors[0].message')"
+                        error_message=$(echo "$update_result" | jq -r '.errors[0].message // "Unknown error"')
+                        log_message "Failed to update $name: $error_message"
+                        log_message "Full response: $update_result"  # Log the full response for debugging
                     fi
                 else
                     log_message "$name did not change"
