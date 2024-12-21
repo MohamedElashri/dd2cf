@@ -2,14 +2,6 @@
 
 dd2cf.sh is a Bash script that automatically updates Cloudflare DNS 'A' records with your current public IP address. This script is particularly useful for systems with dynamic IP addresses that need to maintain accurate DNS records.
 
-## Features
-
-- Automatically detects your public IP address
-- Updates multiple DNS records in Cloudflare
-- Supports proxied and non-proxied records
-- Verbose logging option
-- Easy to configure and use
-
 ## Prerequisites
 
 - Bash shell
