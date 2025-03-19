@@ -145,8 +145,9 @@ if [ "$verbose" = "true" ]; then
     log_message "Raw response from Cloudflare: $existing_records_raw"
 fi
 
-# Extract A records
-a_records=$($JQ -c '.result[] | select(.type == "A") | [.id, .name, .ttl, .content]' <<< "$existing_records_raw")
+# Extract A records using a temporary file instead of here-string (<<< not POSIX-compliant)
+echo "$existing_records_raw" > /tmp/dd2cf_records.json
+a_records=$($JQ -c '.result[] | select(.type == "A") | [.id, .name, .ttl, .content]' /tmp/dd2cf_records.json)
 log_message "Found A records: $a_records"
 
 # Process each A record from the config file
